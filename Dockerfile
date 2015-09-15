@@ -1,3 +1,3 @@
-FROM python:3.4.3-onbuild
+FROM python:3.5-onbuild
 
 CMD [ "python", "./collect.py" ]
