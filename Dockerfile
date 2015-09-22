@@ -1,3 +1,5 @@
 FROM python:3.5-onbuild
 
-CMD [ "python", "./collect.py" ]
+RUN useradd -d /home/user -m -s /bin/bash user
+
+CMD [ "pyinstaller", "collect.spec" ]
