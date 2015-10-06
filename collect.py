@@ -12,7 +12,9 @@ from etcdc.client import Client
 
 
 # pylint: disable=invalid-name,no-self-use,logging-format-interpolation
-RABBITMQ_ADDR = os.getenv('RABBITMQ_SERVICE_HOST', 'localhost')
+
+ETCD_SERVICE_HOST = os.getenv('ETCD_SERVICE_HOST', 'localhost')
+RABBITMQ_SERVICE_HOST = os.getenv('RABBITMQ_SERVICE_HOST', 'localhost')
 QUEUE_NAME = 'processor'
 PROCESSOR_FILES_PATH = '/opt/data/processor/queue'
 
@@ -64,7 +66,7 @@ class Collector(object):
         self.downloader = AuditsDownloader(dst_path)
         self.addr = None
         self.is_downloading = False
-        self.etcd_client = Client()
+        self.etcd_client = Client(address=ETCD_SERVICE_HOST)
 
     def add_to_queue(self, filepath):
         channel.basic_publish(exchange='',
@@ -110,10 +112,10 @@ class Collector(object):
 if __name__ == '__main__':
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
-    logging.info('Attempting connection to rabbitmq {}'.format(RABBITMQ_ADDR))
+    logging.info('Attempting connection to rabbitmq {}'.format(RABBITMQ_SERVICE_HOST))
     connection = pika.BlockingConnection(
-        pika.ConnectionParameters(RABBITMQ_ADDR))
-    logging.info('Connected to {}'.format(RABBITMQ_ADDR))
+        pika.ConnectionParameters(RABBITMQ_SERVICE_HOST))
+    logging.info('Connected to {}'.format(RABBITMQ_SERVICE_HOST))
     channel = connection.channel()
     # Make sure queue is there
     channel.queue_declare(queue=QUEUE_NAME)
