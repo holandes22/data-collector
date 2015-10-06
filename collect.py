@@ -3,6 +3,7 @@ import sys
 import time
 import sched
 import logging
+from contextlib import contextmanager
 
 import pika
 import requests
@@ -18,14 +19,10 @@ PROCESSOR_FILES_PATH = '/opt/data/processor/queue'
 
 class AuditsDownloader(object):
 
-    def __init__(self, dst_path, hooks=None):
+    def __init__(self, dst_path):
         self.dst_path = dst_path
         self.session = requests.Session()
         self.url = None
-        if hooks:
-            self.hooks = hooks
-        else:
-            self.hooks = {}
 
     def set_url(self, addr):
         self.url = 'http://{}/logs'.format(addr)
@@ -37,8 +34,9 @@ class AuditsDownloader(object):
         logs = self.session.get(self.url)
         soup = BeautifulSoup(logs.content, 'html.parser')
         files = []
-        for anchor_tag in soup.select('a[href^=/logs/hdfs-audit.log.]'):
+        for anchor_tag in soup.select('a[href^=/logs/hdfs-audit.log]'):
             files.append(anchor_tag.text.strip())
+        logging.debug('Files: {}'.format(files))
         return files
 
     def download(self, callback=None):
@@ -65,48 +63,52 @@ class Collector(object):
     def __init__(self, dst_path):
         self.downloader = AuditsDownloader(dst_path)
         self.addr = None
+        self.is_downloading = False
+        self.etcd_client = Client()
 
     def add_to_queue(self, filepath):
         channel.basic_publish(exchange='',
                               routing_key=QUEUE_NAME,
                               body=filepath)
-        msg = 'Placed in queue file {}'.format(filepath)
-        logging.info(msg)
+        logging.info('Placed in queue file {}'.format(filepath))
 
     def set_url(self):
         if not self.addr:
-            client = Client()
             try:
-                self.addr = client.get('/hdfs/addr').value
+                self.addr = self.etcd_client.get('/data/collector/addr').value
                 self.downloader.set_url(self.addr)
             except KeyError:
                 logging.info('No hdfs address set yet')
 
+    @contextmanager
+    def downloading(self):
+        self.is_downloading = True
+        yield
+        self.is_downloading = False
+
+    @property
+    def delay(self):
+        try:
+            return int(self.etcd_client.get('/data/collector/delay').value)
+        except KeyError:
+            return 60
+
     def run(self):
         self.set_url()
-        #TODO: Avoid starting if currently downloading
-        self.downloader.download(callback=self.add_to_queue)
+        with self.downloading():
+            self.downloader.download(callback=self.add_to_queue)
 
-    def run_periodically(self, delay):
+    def run_periodically(self):
         self.run()
         scheduler = sched.scheduler(time.time, time.sleep)
         while True:
-            scheduler.enter(delay, 1, self.run, [])
-            scheduler.run()
-
-
-def mkdirs():
-    for d in [PROCESSOR_FILES_PATH]:
-        try:
-            os.makedirs(d)
-        except OSError:
-            pass
+            if not self.is_downloading:  # Add to queue
+                scheduler.enter(self.delay, 1, self.run, [])
+                scheduler.run()
 
 
 if __name__ == '__main__':
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
-
-    mkdirs()
 
     logging.info('Attempting connection to rabbitmq {}'.format(RABBITMQ_ADDR))
     connection = pika.BlockingConnection(
@@ -119,7 +121,7 @@ if __name__ == '__main__':
 
     # Start loop runner
     collector = Collector(PROCESSOR_FILES_PATH)
-    collector.run_periodically(5)
+    collector.run_periodically()
 
     channel.close()
     connection.close()
