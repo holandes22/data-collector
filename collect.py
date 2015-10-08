@@ -91,7 +91,7 @@ class Collector(object):
         try:
             return int(self.etcd_client.get('/data/collector/delay').value)
         except KeyError:
-            return 1800
+            return 60
 
     def run(self):
         self.set_url()
