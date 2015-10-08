@@ -13,7 +13,7 @@ from etcdc.client import Client
 
 # pylint: disable=invalid-name,no-self-use,logging-format-interpolation
 
-ETCD_SERVICE_HOST = os.getenv('ETCD_SERVICE_HOST', 'localhost')
+ETCD_SERVICE_HOST = os.getenv('ETCD0_SERVICE_HOST', 'localhost')
 RABBITMQ_SERVICE_HOST = os.getenv('RABBITMQ_SERVICE_HOST', 'localhost')
 QUEUE_NAME = 'processor'
 PROCESSOR_FILES_PATH = '/opt/data/processor/queue'
@@ -64,9 +64,8 @@ class Collector(object):
 
     def __init__(self, dst_path):
         self.downloader = AuditsDownloader(dst_path)
-        self.addr = None
         self.is_downloading = False
-        self.etcd_client = Client(address=ETCD_SERVICE_HOST)
+        self.etcd_client = Client(address=ETCD_SERVICE_HOST, port='2379')
 
     def add_to_queue(self, filepath):
         channel.basic_publish(exchange='',
@@ -75,12 +74,11 @@ class Collector(object):
         logging.info('Placed in queue file {}'.format(filepath))
 
     def set_url(self):
-        if not self.addr:
-            try:
-                self.addr = self.etcd_client.get('/data/collector/addr').value
-                self.downloader.set_url(self.addr)
-            except KeyError:
-                logging.info('No hdfs address set yet')
+        try:
+            addr = self.etcd_client.get('/data/collector/addr').value
+            self.downloader.set_url(addr)
+        except KeyError:
+            logging.info('No hdfs address set yet')
 
     @contextmanager
     def downloading(self):
@@ -93,7 +91,7 @@ class Collector(object):
         try:
             return int(self.etcd_client.get('/data/collector/delay').value)
         except KeyError:
-            return 60
+            return 1800
 
     def run(self):
         self.set_url()
@@ -112,7 +110,9 @@ class Collector(object):
 if __name__ == '__main__':
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
-    logging.info('Attempting connection to rabbitmq {}'.format(RABBITMQ_SERVICE_HOST))
+    logging.debug('etcd host: {}'.format(ETCD_SERVICE_HOST))
+    logging.debug('rabbitmq host: {}'.format(RABBITMQ_SERVICE_HOST))
+    logging.info('Connecting to rabbitmq {}'.format(RABBITMQ_SERVICE_HOST))
     connection = pika.BlockingConnection(
         pika.ConnectionParameters(RABBITMQ_SERVICE_HOST))
     logging.info('Connected to {}'.format(RABBITMQ_SERVICE_HOST))
