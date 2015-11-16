@@ -69,13 +69,14 @@ class Collector(object):
         self.downloader = AuditsDownloader(dst_path)
         self.is_downloading = False
         self.etcd_client = Client(address=ETCD_SERVICE_HOST, port='2379')
+        self.rconn = rethinkdb.connect(RETHINKDB_SERVICE_HOST, '28015')
 
     def add_to_queue(self, filepath):
         channel.basic_publish(exchange='',
                               routing_key=QUEUE_NAME,
                               body=filepath)
         logging.info('Placed in queue file {}'.format(filepath))
-        rethinkdb.db('data').table('collected').insert({'filepath': filepath})
+        rethinkdb.db('data').table('collected').insert({'filepath': filepath}).run(self.rconn)
 
     def set_url(self):
         try:
@@ -114,7 +115,6 @@ class Collector(object):
 
 if __name__ == '__main__':
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
-    rethinkdb.connect(RETHINKDB_SERVICE_HOST).repl()
     logging.debug('etcd host: {}'.format(ETCD_SERVICE_HOST))
     logging.debug('rabbitmq host: {}'.format(RABBITMQ_SERVICE_HOST))
     logging.debug('rethinkdb host: {}'.format(RETHINKDB_SERVICE_HOST))
