@@ -7,6 +7,7 @@ from contextlib import contextmanager
 
 import pika
 import requests
+import rethinkdb
 from bs4 import BeautifulSoup
 from etcdc.client import Client
 
@@ -15,6 +16,7 @@ from etcdc.client import Client
 
 ETCD_SERVICE_HOST = os.getenv('ETCD0_SERVICE_HOST', 'localhost')
 RABBITMQ_SERVICE_HOST = os.getenv('RABBITMQ_SERVICE_HOST', 'localhost')
+RETHINKDB_SERVICE_HOST = os.getenv('RETHINKDB_SERVICE_HOST', 'localhost')
 QUEUE_NAME = 'processor'
 PROCESSOR_FILES_PATH = '/opt/data/processor/queue'
 
@@ -26,8 +28,9 @@ class AuditsDownloader(object):
         self.session = requests.Session()
         self.url = None
 
-    def set_url(self, addr):
-        self.url = 'http://{}/logs'.format(addr)
+    def set_url(self, url):
+        # http://<hostname_or_ip_addr>:<port>/<path_to_logs>
+        self.url = url
 
     @property
     def filenames(self):
@@ -72,11 +75,13 @@ class Collector(object):
                               routing_key=QUEUE_NAME,
                               body=filepath)
         logging.info('Placed in queue file {}'.format(filepath))
+        rethinkdb.db('data').table('collected').insert({'filepath': filepath})
 
     def set_url(self):
         try:
-            addr = self.etcd_client.get('/data/collector/addr').value
-            self.downloader.set_url(addr)
+            url = self.etcd_client.get('/data/collector/url').value
+            if url.lower() not in ['none', 'null']:
+                self.downloader.set_url(url)
         except KeyError:
             logging.info('No hdfs address set yet')
 
@@ -109,9 +114,10 @@ class Collector(object):
 
 if __name__ == '__main__':
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
-
+    rethinkdb.connect(RETHINKDB_SERVICE_HOST).repl()
     logging.debug('etcd host: {}'.format(ETCD_SERVICE_HOST))
     logging.debug('rabbitmq host: {}'.format(RABBITMQ_SERVICE_HOST))
+    logging.debug('rethinkdb host: {}'.format(RETHINKDB_SERVICE_HOST))
     logging.info('Connecting to rabbitmq {}'.format(RABBITMQ_SERVICE_HOST))
     connection = pika.BlockingConnection(
         pika.ConnectionParameters(RABBITMQ_SERVICE_HOST))
