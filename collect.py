@@ -4,6 +4,7 @@ import time
 import sched
 import logging
 from contextlib import contextmanager
+from urllib.parse import urlparse
 
 import pika
 import requests
@@ -39,7 +40,10 @@ class AuditsDownloader(object):
         logs = self.session.get(self.url)
         soup = BeautifulSoup(logs.content, 'html.parser')
         files = []
-        for anchor_tag in soup.select('a[href^=/logs/hdfs-audit.log]'):
+        url_path = urlparse(self.url).path
+        pattern = 'hdfs-'
+        selector = 'a[href^={}]'.format(os.path.join(url_path, pattern))
+        for anchor_tag in soup.select(selector):
             files.append(anchor_tag.text.strip())
         logging.debug('Files: {}'.format(files))
         return files
@@ -75,8 +79,8 @@ class Collector(object):
         channel.basic_publish(exchange='',
                               routing_key=QUEUE_NAME,
                               body=filepath)
-        logging.info('Placed in queue file {}'.format(filepath))
         rethinkdb.db('data').table('collected').insert({'filepath': filepath}).run(self.rconn)
+        logging.info('Placed in queue file {}'.format(filepath))
 
     def set_url(self):
         try:
