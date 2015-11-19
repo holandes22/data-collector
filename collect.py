@@ -27,11 +27,8 @@ class AuditsDownloader(object):
     def __init__(self, dst_path):
         self.dst_path = dst_path
         self.session = requests.Session()
-        self.url = None
-
-    def set_url(self, url):
         # http://<hostname_or_ip_addr>:<port>/<path_to_logs>
-        self.url = url
+        self.url = None
 
     @property
     def filenames(self):
@@ -74,11 +71,28 @@ class Collector(object):
         self.is_downloading = False
         self.etcd_client = Client(address=ETCD_SERVICE_HOST, port='2379')
         self.rconn = rethinkdb.connect(RETHINKDB_SERVICE_HOST, '28015')
+        with self.blocking_channel() as channel:
+            # Make sure queue is there
+            channel.queue_declare(queue=QUEUE_NAME)
+            logging.info('queue {} declared'.format(QUEUE_NAME))
+
+
+    @contextmanager
+    def blocking_channel(self):
+        connection = pika.BlockingConnection(
+            pika.ConnectionParameters(RABBITMQ_SERVICE_HOST))
+        channel = connection.channel()
+
+        yield channel
+
+        channel.close()
+        connection.close()
 
     def add_to_queue(self, filepath):
-        channel.basic_publish(exchange='',
-                              routing_key=QUEUE_NAME,
-                              body=filepath)
+        with self.blocking_channel() as channel:
+            channel.basic_publish(exchange='',
+                                  routing_key=QUEUE_NAME,
+                                  body=filepath)
         rethinkdb.db('data').table('collected').insert({'filepath': filepath}).run(self.rconn)
         logging.info('Placed in queue file {}'.format(filepath))
 
@@ -86,7 +100,7 @@ class Collector(object):
         try:
             url = self.etcd_client.get('/data/collector/url').value
             if url.lower() not in ['none', 'null']:
-                self.downloader.set_url(url)
+                self.downloader.url = url
         except KeyError:
             logging.info('No hdfs address set yet')
 
@@ -122,18 +136,8 @@ if __name__ == '__main__':
     logging.debug('etcd host: {}'.format(ETCD_SERVICE_HOST))
     logging.debug('rabbitmq host: {}'.format(RABBITMQ_SERVICE_HOST))
     logging.debug('rethinkdb host: {}'.format(RETHINKDB_SERVICE_HOST))
-    logging.info('Connecting to rabbitmq {}'.format(RABBITMQ_SERVICE_HOST))
-    connection = pika.BlockingConnection(
-        pika.ConnectionParameters(RABBITMQ_SERVICE_HOST))
-    logging.info('Connected to {}'.format(RABBITMQ_SERVICE_HOST))
-    channel = connection.channel()
-    # Make sure queue is there
-    channel.queue_declare(queue=QUEUE_NAME)
-    logging.info('queue {} declared'.format(QUEUE_NAME))
 
     # Start loop runner
     collector = Collector(PROCESSOR_FILES_PATH)
     collector.run_periodically()
 
-    channel.close()
-    connection.close()
