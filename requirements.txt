@@ -1,4 +1,4 @@
-git+https://github.com/holandes22/etcdc@v0.1.0
+https://github.com/holandes22/etcdc/archive/v0.1.0.zip
 pika==0.10.0
 beautifulsoup4==4.4.1
 requests==2.7.0
